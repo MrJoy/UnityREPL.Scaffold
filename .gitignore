@@ -22,8 +22,5 @@ Temp/
 *.mdb
 *.mdb.meta
 
-# Asset Store tools...
-/Assets/AssetStoreTools*
-
 # Builds directory...
 /Builds/
