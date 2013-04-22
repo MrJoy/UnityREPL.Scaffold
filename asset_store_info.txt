@@ -1,0 +1,13 @@
+Needed:
+  Icon:
+    128x128
+    200x258
+    860x389
+  Screenshots.
+Category: Editor Extensions > Utilities
+Price: $10
+Description:
+  An interactive C# shell (a REPL -- Read, Eval, Print, Loop) for the Unity development environment.
+
+  Run snippets of code to automate repetive tasks, or just to explore API functionality.
+
