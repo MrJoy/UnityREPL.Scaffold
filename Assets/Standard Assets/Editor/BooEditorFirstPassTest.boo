@@ -1,0 +1,2 @@
+internal class BooEditorFirstPassTest:
+  pass
