@@ -9,3 +9,5 @@
 * Make sure `Invoking` / `InvokingThread` are being managed correctly.
 * Can we make output / logs show up inline so people don't need to switch to a console tab?
   * Alternatively, can we pop a window split vertically with our stuff at top, and a Console tab below?
+* Figure out Unity packaging for the asset store.
+* Flesh out SBOM.
