@@ -16,10 +16,6 @@
 // TODO: Suss out undo and wrap editor accordingly.
 // TODO: Make use of EditorWindow.minSize/EditorWindow.maxSize.
 //-----------------------------------------------------------------
-#if UNITY_5_2 || UNITY_5_1 || UNITY_5_0 || UNITY_4_6 || UNITY_4_5 || UNITY_4_4 || UNITY_4_3 || UNITY_4_2 || UNITY_4_1 || UNITY_4_0_1 || UNITY_4_0
-  #define UNITY_5_3_PLUS
-#endif
-
 using UnityEditor;
 using UnityEngine;
 using System;
@@ -35,8 +31,8 @@ public class Shell : EditorWindow {
   //----------------------------------------------------------------------------
   // Constants, specified here to keep things DRY.
   //----------------------------------------------------------------------------
-  public const string VERSION = "2.0.1",
-                      COPYRIGHT = "(C) Copyright 2009-2015 Jon Frisby\nAll rights reserved",
+  public const string VERSION = "3.0.0",
+                      COPYRIGHT = "(C) Copyright 2009-2025 Jon Frisby\nAll rights reserved",
 
                       MAIN_PROMPT = "---->",
                       CONTINUATION_PROMPT = "cont>";
@@ -45,8 +41,6 @@ public class Shell : EditorWindow {
   // Code Execution Functionality
   //----------------------------------------------------------------------------
   private EvaluationHelper helper = new EvaluationHelper();
-  [System.NonSerialized]
-  private bool isInitialized = false;
 
   public void Update() {
     if(doProcess) {
@@ -55,12 +49,12 @@ public class Shell : EditorWindow {
       if(EditorApplication.isCompiling)
         return;
 
-      helper.Init(ref isInitialized);
       doProcess = false;
       bool compiledCorrectly = helper.Eval(codeToProcess);
-      if(compiledCorrectly)
+      if (compiledCorrectly)
         resetCommand = true;
-      else {
+      else
+      {
         // Continue with what enter the user pressed...  Yes, this is an ugly
         // way to handle it.
         codeToProcess = Paste(editorState, "\n", false);
@@ -201,24 +195,13 @@ public class Shell : EditorWindow {
         endAt = Mathf.Max(editor.cursorIndex, editor.selectIndex);
     string prefix = "",
            suffix = "";
-#if UNITY_5_3_PLUS
-    if(startAt > 0)
-      prefix = editor.content.text.Substring(0, startAt);
-    if(endAt < editor.content.text.Length)
-      suffix = editor.content.text.Substring(endAt);
-#else
     if(startAt > 0)
       prefix = editor.text.Substring(0, startAt);
     if(endAt < editor.text.Length)
       suffix = editor.text.Substring(endAt);
-#endif
     string newCorpus = prefix + textToPaste + suffix;
 
-#if UNITY_5_3_PLUS
-    editor.content.text = newCorpus;
-#else
     editor.text = newCorpus;
-#endif
     if(continueSelection) {
       if(editor.cursorIndex > editor.selectIndex)
         editor.cursorIndex = prefix.Length + textToPaste.Length;
@@ -240,24 +223,13 @@ public class Shell : EditorWindow {
     string prefix = "",
            suffix = "";
 
-#if UNITY_5_3_PLUS
-    if(startAt > 0)
-      prefix = editor.content.text.Substring(0, startAt);
-    if(endAt < editor.content.text.Length)
-      suffix = editor.content.text.Substring(endAt);
-#else
     if(startAt > 0)
       prefix = editor.text.Substring(0, startAt);
     if(endAt < editor.text.Length)
       suffix = editor.text.Substring(endAt);
-#endif
     string newCorpus = prefix + suffix;
 
-#if UNITY_5_3_PLUS
-    editor.content.text = newCorpus;
-#else
     editor.text = newCorpus;
-#endif
     editor.cursorIndex = editor.selectIndex = prefix.Length;
     return newCorpus;
   }
@@ -267,23 +239,27 @@ public class Shell : EditorWindow {
   // ordinarily does not support.
   private void FilterEditorInputs() {
     Event evt = Event.current;
-    if(focusedWindow == this) {
-      // Only attempt to grab this if our window has focus in order to make
-      // indent/unindent menu items behave sanely.
-      int editorId = GUIUtility.keyboardControl;
-      try {
-        editorState = GUIUtility.QueryStateObject(typeof(System.Object), editorId) as TextEditor;
-      } catch(KeyNotFoundException) {
-        // Ignoring because this seems to only mean that no such object was found.
-      }
-      if(editorState == null)
-        return;
-    } else
+    if (focusedWindow != this)
+      return;
+
+    // Only attempt to grab this if our window has focus in order to make
+    // indent/unindent menu items behave sanely.
+    int editorId = GUIUtility.keyboardControl;
+    try
+    {
+      editorState = GUIUtility.QueryStateObject(typeof(System.Object), editorId) as TextEditor;
+    }
+    catch (KeyNotFoundException)
+    {
+      // Ignoring because this seems to only mean that no such object was found.
+    }
+    if (editorState == null)
       return;
 
     if(doProcess) {
+      // TODO: Fix this so that things like cmd-~ still work when running code.
       // If we're waiting for a command to run, don't muck with the text!
-      if(evt.isKey)
+      if (evt.isKey)
         evt.Use();
       return;
     }
@@ -340,26 +316,31 @@ public class Shell : EditorWindow {
         break;
       }
     } else if(evt.type == EventType.ExecuteCommand) {
-      switch(evt.commandName) {
-      // A couple TextEditor functions actually work, so use them...
-      case "SelectAll":
-        editorState.SelectAll();
-        break;
-      case "Copy":
-        editorState.Copy();
-        break;
-      // But some don't:
-      case "Paste":
-        // Manually paste.  Keeping Use() out of the Paste() method so we can
-        // re-use the functionality elsewhere.
-        codeToProcess = Paste(editorState, EditorGUIUtility.systemCopyBuffer, false);
-        evt.Use();
-        break;
-      case "Cut":
-        // Ditto -- manual cut.
-        codeToProcess = Cut(editorState);
-        evt.Use();
-        break;
+      switch (evt.commandName)
+      {
+        // A couple TextEditor functions actually work, so use them...
+        case "SelectAll":
+          editorState.SelectAll();
+          break;
+        case "Copy":
+          editorState.Copy();
+          break;
+        // But some don't:
+        case "Paste":
+          // Manually paste.  Keeping Use() out of the Paste() method so we can
+          // re-use the functionality elsewhere.
+          codeToProcess = Paste(editorState, EditorGUIUtility.systemCopyBuffer, false);
+          evt.Use();
+          break;
+        case "Cut":
+          // Ditto -- manual cut.
+          codeToProcess = Cut(editorState);
+          evt.Use();
+          break;
+        default:
+          // If we need to suss out other commands to support...
+          // Debug.Log("Execute: " + evt.commandName);
+          break;
       }
     }
   }
@@ -409,7 +390,7 @@ public class Shell : EditorWindow {
 
   private void ShowEditor() {
     GUILayout.BeginHorizontal();
-    GUILayout.Label(useContinuationPrompt ? Shell.CONTINUATION_PROMPT : Shell.MAIN_PROMPT, EditorStyles.wordWrappedLabel, GUILayout.Width(37));
+    GUILayout.Label(useContinuationPrompt ? Shell.CONTINUATION_PROMPT : Shell.MAIN_PROMPT, EditorStyles.wordWrappedLabel, GUILayout.Width(39));
 
     lnEditorState.text = codeToProcess;
     lnEditorState = UnityREPLHelper.NumberedTextArea(editorControlName, lnEditorState);
@@ -417,12 +398,10 @@ public class Shell : EditorWindow {
     GUILayout.EndHorizontal();
   }
 
-  private Hashtable fields = null;
   public Vector2 scrollPosition = Vector2.zero;
 
   private void ShowVars() {
-    if(fields == null)
-      fields = EvaluatorProxy.fields;
+    var fields = EvaluatorProxy.Fields;
 
     scrollPosition = EditorGUILayout.BeginScrollView(scrollPosition, false, false);
     EditorGUI.indentLevel++;
@@ -433,10 +412,17 @@ public class Shell : EditorWindow {
     // TODO: way to handle tabular data, and need a way to track what
     // TODO: has/hasn't changed here.
     StringBuilder tmp = new StringBuilder();
-    foreach(DictionaryEntry kvp in fields) {
-      FieldInfo field = (FieldInfo)kvp.Value;
+    foreach(var kvp in fields) {
+      Tuple<Mono.CSharp.FieldSpec, FieldInfo> fieldSpec = kvp.Value;
+      FieldInfo field = (FieldInfo)fieldSpec.Item2;
+
+      if(field == null)
+        continue; // Skip fields that don't have a FieldInfo (e.g. static properties).
+
       GUILayout.BeginHorizontal();
-      GUILayout.Label(TypeManagerProxy.CSharpName(field.FieldType));
+      GUILayout.Label(field.FieldType.Namespace);
+      GUILayout.Space(10);
+      GUILayout.Label(field.FieldType.Name);
       GUILayout.Space(10);
       GUILayout.Label((string)kvp.Key);
       GUILayout.FlexibleSpace();
@@ -498,13 +484,6 @@ public class Shell : EditorWindow {
 
     showLanguageFeatures = EditorGUILayout.Foldout(showLanguageFeatures, "Language Features", HelpStyles.SubHeader);
     if(showLanguageFeatures) {
-      GUILayout.Label("UnityREPL implements a newer version of the C# language than Unity itself supports, unless" +
-                      " you are using Unity 3.0 or newer.  You get a couple nifty features for code entered into the interactive" +
-                      " editor...", HelpStyles.Content);
-      GUILayout.Label("", HelpStyles.Content);
-      GUILayout.Label("The 'var' keyword:", HelpStyles.Content);
-      GUILayout.Label("var i = 3;", HelpStyles.Code);
-      GUILayout.Label("", HelpStyles.Content);
       GUILayout.Label("Linq:", HelpStyles.Content);
       GUILayout.Label("= from f in Directory.GetFiles(Application.dataPath)\n" +
                       "  let fi = new FileInfo(f)\n" +

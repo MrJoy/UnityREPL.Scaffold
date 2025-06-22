@@ -17,108 +17,138 @@ class EvaluationException : Exception {
 }
 
 class EvaluationHelper {
-  public EvaluationHelper() {
-    TryLoadingAssemblies(false);
-  }
+  public EvaluationHelper() {}
 
-  protected bool TryLoadingAssemblies(bool isInitialized) {
-    if(isInitialized)
-      return true;
+  // static string[] REQUIRED_ASSEMBLIES = {
+  //   "UnityEditor.dll",
+  //   "UnityEngine.dll",
+  //   "mscorlib.dll",
+  //   "System.dll",
+  // };
 
-    List<string> failedAssemblies = new List<string>();
-    foreach (Assembly b in AppDomain.CurrentDomain.GetAssemblies())
+  static string[] NAMESPACES = {
+    "System",
+    "System.IO",
+    "System.Linq",
+    "System.Collections",
+    "System.Collections.Generic",
+    "UnityEditor",
+    "UnityEngine",
+  };
+
+  private static Mono.CSharp.Evaluator _evaluator;
+  internal static Mono.CSharp.Evaluator EvaluatorInstance
+  {
+    get
     {
-      string assemblyShortName = b.GetName().Name;
-      if (!(assemblyShortName.StartsWith("Mono.CSharp") || assemblyShortName.StartsWith("UnityDomainLoad") ||
-           assemblyShortName.StartsWith("interactive")))
+      if (_evaluator == null)
       {
-        try
+        CompilerSettings settings = new CompilerSettings();
+        // foreach (string asm in REQUIRED_ASSEMBLIES)
+        //   settings.AssemblyReferences.Add(asm);
+
+        /*
+        We need to tell the evaluator to reference stuff we care about.  Since
+        there's a lot of dynamically named stuff that we might want, we just pull
+        the list of loaded assemblies and include them "all" (with the exception of
+        a couple that I have a sneaking suspicion may be bad to reference -- noted
+        below).
+
+        Examples of what we might get when asking the current AppDomain for all
+        assemblies (short names only):
+
+        Stuff we avoid:
+          UnityDomainLoad <-- Unity gubbins.  Probably want to avoid this.
+          Mono.CSharp <-- The self-same package used to pull this off.  Probably
+                          safe, but not taking any chances.
+          interactive0 <-- Looks like what Mono.CSharp is making on the fly.  If we
+                          load those, it APPEARS we may wind up holding onto them
+                          'forever', so...  Don't even try.
+
+
+        Mono runtime, which we probably get 'for free', but include just in case:
+          System
+          mscorlib
+
+        Unity runtime, which we definitely want:
+          UnityEditor
+          UnityEngine
+
+        The assemblies Unity generated from our project code now all begin with Assembly:
+          Assembly-CSharp
+          Assembly-CSharp-Editor
+          ...
+        */
+        List<string> failedAssemblies = new List<string>();
+        foreach (Assembly b in AppDomain.CurrentDomain.GetAssemblies())
         {
-          // Debug.Log("Giving Mono.CSharp a reference to assembly: " + assemblyShortName);
-          Evaluator.ReferenceAssembly(b);
+          string assemblyShortName = b.GetName().Name;
+          if (!(assemblyShortName.StartsWith("Mono.CSharp") || assemblyShortName.StartsWith("UnityDomainLoad") || assemblyShortName.StartsWith("interactive")))
+          {
+            try
+            {
+              // _evaluator.ReferenceAssembly(b);
+              settings.AssemblyReferences.Add(assemblyShortName);
+            }
+            catch (Exception)
+            {
+              failedAssemblies.Add(assemblyShortName);
+            }
+          }
         }
-        catch (Exception)
+
+        if (failedAssemblies.Count > 0)
         {
-          failedAssemblies.Add(assemblyShortName);
+          failedAssemblies.Sort();
+          Debug.LogWarning("Failed to reference the following assemblies:\n  " + string.Join("\n  ", failedAssemblies));
         }
+
+        _evaluator = new Mono.CSharp.Evaluator(new CompilerContext(settings, new LogReportPrinter()));
+
+        // These won't work the first time through after an assembly reload.  No
+        // clue why, but the Unity* namespaces don't get found.  Perhaps they're
+        // being loaded into our AppDomain asynchronously and just aren't done yet?
+        // Regardless, attempting to hit them early and then trying again later
+        // seems to work fine.
+        List<string> failedNamespaces = new List<string>();
+        foreach (string ns in NAMESPACES)
+        {
+          try
+          {
+            _evaluator.Run("using " + ns + ";");
+          }
+          catch (Exception)
+          {
+            failedNamespaces.Add(ns);
+          }
+        }
+
+        if (failedNamespaces.Count > 0)
+        {
+          failedNamespaces.Sort();
+          Debug.LogWarning("Failed to reference the following namespaces:\n  " + string.Join("\n  ", failedNamespaces));
+        }
+
+        _evaluator.InteractiveBaseClass = typeof(UnityBaseClass);
       }
+
+      return _evaluator;
     }
-
-    if (failedAssemblies.Count > 0)
-    {
-      failedAssemblies.Sort();
-      Debug.LogWarning("Failed to reference the following assemblies:\n  " + string.Join("\n  ", failedAssemblies));
-    }
-
-    // These won't work the first time through after an assembly reload.  No
-    // clue why, but the Unity* namespaces don't get found.  Perhaps they're
-    // being loaded into our AppDomain asynchronously and just aren't done yet?
-    // Regardless, attempting to hit them early and then trying again later
-    // seems to work fine.
-    Evaluator.Run("using System;");
-    Evaluator.Run("using System.IO;");
-    Evaluator.Run("using System.Linq;");
-    Evaluator.Run("using System.Collections;");
-    Evaluator.Run("using System.Collections.Generic;");
-    Evaluator.Run("using UnityEditor;");
-    Evaluator.Run("using UnityEngine;");
-
-    return true;
   }
 
-  public void Init(ref bool isInitialized) {
-    /*
-    We need to tell the evaluator to reference stuff we care about.  Since
-    there's a lot of dynamically named stuff that we might want, we just pull
-    the list of loaded assemblies and include them "all" (with the exception of
-    a couple that I have a sneaking suspicion may be bad to reference -- noted
-    below).
-
-    Examples of what we might get when asking the current AppDomain for all
-    assemblies (short names only):
-
-    Stuff we avoid:
-      UnityDomainLoad <-- Unity gubbins.  Probably want to avoid this.
-      Mono.CSharp <-- The self-same package used to pull this off.  Probably
-                      safe, but not taking any chances.
-      interactive0 <-- Looks like what Mono.CSharp is making on the fly.  If we
-                       load those, it APPEARS we may wind up holding onto them
-                       'forever', so...  Don't even try.
-
-
-    Mono runtime, which we probably get 'for free', but include just in case:
-      System
-      mscorlib
-
-    Unity runtime, which we definitely want:
-      UnityEditor
-      UnityEngine
-      UnityScript.Lang
-      Boo.Lang
-
-    The assemblies Unity generated from our project code now all begin with Assembly:
-      Assembly-CSharp
-      Assembly-CSharp-Editor
-      ...
-    */
-    isInitialized = TryLoadingAssemblies(isInitialized);
-
-    if(Evaluator.InteractiveBaseClass != typeof(UnityBaseClass))
-      Evaluator.InteractiveBaseClass = typeof(UnityBaseClass);
-  }
-
-  public bool Eval(string code) {
+  public bool Eval(string code)
+  {
     EditorApplication.LockReloadAssemblies();
 
-    bool status     = false,
-         hasOutput  = false;
-    object output   = null;
-    string res      = null,
-           tmpCode  = code.Trim();
+    bool status = false, hasOutput = false;
+    object output = null;
+    string res = null, tmpCode = code.Trim();
     // Debug.Log("Evaluating: " + tmpCode);
 
-    try {
-      if(tmpCode.StartsWith("=")) {
+    try
+    {
+      if (tmpCode.StartsWith("="))
+      {
         // Special case handling of calculator mode.  The problem is that
         // expressions involving multiplication are grammatically ambiguous
         // without a var declaration or some other grammatical construct.
@@ -126,28 +156,36 @@ class EvaluationHelper {
         tmpCode = "(" + tmpCode.Substring(1, tmpCode.Length - 1) + ");";
       }
       res = Evaluate(tmpCode, out output, out hasOutput);
-    } catch(EvaluationException) {
-      Debug.LogError(@"Error compiling/executing code.  Please double-check syntax, method/variable names, etc.
-You can find more information in Unity's `Editor.log` file (*not* the editor console!).");
-
-      output    = new Evaluator.NoValueSet();
+    }
+    catch (EvaluationException)
+    {
+      output = null;
       hasOutput = false;
-      res       = tmpCode; // Enable continued editing on syntax errors, etc.
-    } catch(Exception e) {
+      res = tmpCode; // Enable continued editing on syntax errors, etc.
+    }
+    catch (Exception e)
+    {
       Debug.LogError(e);
 
-      res       = tmpCode; // Enable continued editing on unexpected errors.
-    } finally {
+      res = tmpCode; // Enable continued editing on unexpected errors.
+    }
+    finally
+    {
       status = res == null;
     }
 
-    if(hasOutput) {
-      if(status) {
-        try {
+    if (hasOutput)
+    {
+      if (status)
+      {
+        try
+        {
           StringBuilder sb = new StringBuilder();
           PrettyPrint.PP(sb, output, true);
           Debug.Log(sb.ToString());
-        } catch(Exception e) {
+        }
+        catch (Exception e)
+        {
           Debug.LogError(e.ToString().Trim());
         }
       }
@@ -164,27 +202,29 @@ You can find more information in Unity's `Editor.log` file (*not* the editor con
 
     CompiledMethod compiledMethod;
     string remainder = null;
-    remainder = Evaluator.Compile(input, out compiledMethod);
+    remainder = EvaluatorInstance.Compile(input, out compiledMethod);
     if(remainder != null)
       return remainder;
-    if(compiledMethod == null)
+
+    if (compiledMethod == null)
       throw new EvaluationException();
 
-    object typeFromHandle = typeof(Evaluator.NoValueSet);
+    object typeFromHandle = null;
     try {
-      EvaluatorProxy.invoke_thread = Thread.CurrentThread;
-      EvaluatorProxy.invoking      = true;
+      EvaluatorProxy.InvokeThread = Thread.CurrentThread;
+      EvaluatorProxy.Invoking     = true;
       compiledMethod(ref typeFromHandle);
     } catch(ThreadAbortException arg) {
       Thread.ResetAbort();
-      Console.WriteLine("Interrupted!\n{0}", arg);
+      Debug.LogError("Interrupted!\n" + arg.ToString());
       // TODO: How best to handle this?
     } finally {
-      EvaluatorProxy.invoking = false;
+      EvaluatorProxy.Invoking = false;
     }
-    if((typeFromHandle as Type) != typeof(Evaluator.NoValueSet)) {
-      result_set  = true;
-      result      = typeFromHandle;
+    if (typeFromHandle != null)
+    {
+      result_set = true;
+      result = typeFromHandle;
     }
     return null;
   }
@@ -192,44 +232,74 @@ You can find more information in Unity's `Editor.log` file (*not* the editor con
 
 // WARNING: Absolutely NOT thread-safe!
 internal class EvaluatorProxy : ReflectionProxy {
-  private static readonly Type _Evaluator = typeof(Evaluator);
-  private static readonly FieldInfo _fields = _Evaluator.GetField("fields", NONPUBLIC_STATIC);
-  private static readonly FieldInfo _invoke_thread = _Evaluator.GetField("invoke_thread", NONPUBLIC_STATIC);
-  private static readonly FieldInfo _invoking = _Evaluator.GetField("invoking", NONPUBLIC_STATIC);
+  private static readonly Type EvaluatorType = typeof(Mono.CSharp.Evaluator);
 
-  internal static Hashtable fields { get { return (Hashtable)_fields.GetValue(null); } }
-  internal static Thread invoke_thread {
-    get { return (Thread)_invoke_thread.GetValue(null); }
-    set { _invoke_thread.SetValue(null, value); }
-  }
-  internal static bool invoking {
-    get { return (bool)_invoking.GetValue(false); }
-    set { _invoking.SetValue(null, value); }
-  }
-}
-
-// WARNING: Absolutely NOT thread-safe!
-internal class TypeManagerProxy : ReflectionProxy {
-  private static readonly Type _TypeManager = typeof(Evaluator).Assembly.GetType("Mono.CSharp.TypeManager");
-  private static readonly MethodInfo _CSharpName = _TypeManager.GetMethod("CSharpName",
-                                                                          PUBLIC_STATIC,
-                                                                          null,
-                                                                          Signature(typeof(Type)),
-                                                                          null);
-
-  // Save an allocation per access here...
-  private static readonly object[] _CSharpNameParams = new object[] { null };
-
-  internal static string CSharpName(Type t) {
-    // TODO: What am I doing wrong here that this throws on generics??
-    string name = "";
-    try {
-      _CSharpNameParams[0] = t;
-      name = (string)_CSharpName.Invoke(null, _CSharpNameParams);
-    } catch(Exception) {
-      name = "?";
+  private static FieldInfo _invoke_thread;
+  private static FieldInfo invoke_thread
+  {
+    get
+    {
+      if (_invoke_thread == null)
+      {
+        _invoke_thread = EvaluatorType.GetField("invoke_thread", NONPUBLIC_STATIC);
+        if (_invoke_thread == null)
+        {
+          Debug.LogError("EvaluatorProxy.InvokeThreadField is null!  This is a bug in UnityREPL.");
+          return null;
+        }
+      }
+      return _invoke_thread;
     }
-    return name;
+  }
+
+  private static FieldInfo _invoking = EvaluatorType.GetField("invoking", NONPUBLIC_STATIC);
+  private static FieldInfo invoking
+  {
+    get
+    {
+      if (_invoking == null)
+      {
+        _invoking = EvaluatorType.GetField("invoking", NONPUBLIC_STATIC);
+        if (_invoking == null)
+        {
+          Debug.LogError("EvaluatorProxy.InvokingField is null!  This is a bug in UnityREPL.");
+          return null;
+        }
+      }
+      return _invoking;
+    }
+  }
+
+  private static FieldInfo _fields;
+  internal static Dictionary<string, Tuple<FieldSpec, FieldInfo>> Fields
+  {
+    get
+    {
+      if (_fields == null)
+      {
+        _fields = EvaluatorType.GetField("fields", BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+        if (_fields == null)
+        {
+          Debug.LogError("EvaluatorProxy.fields is null!  This is a bug in UnityREPL.");
+          return new Dictionary<string, Tuple<FieldSpec, FieldInfo>>();
+        }
+      }
+      // EvaluationHelper.EvaluatorInstance
+      // EvaluatorType
+      return (Dictionary<string, Tuple<FieldSpec, FieldInfo>>)_fields.GetValue(EvaluationHelper.EvaluatorInstance);
+    }
+  }
+
+  internal static Thread InvokeThread
+  {
+    get { return (Thread)invoke_thread.GetValue(EvaluatorType); }
+    set { invoke_thread.SetValue(EvaluatorType, value); }
+  }
+
+  internal static bool Invoking
+  {
+    get { return (bool)invoking.GetValue(EvaluatorType); }
+    set { invoking.SetValue(EvaluatorType, value); }
   }
 }
 
@@ -253,13 +323,14 @@ vars;     -- Show the variables you've created this session, and their current v
 
   public static REPLMessage vars {
     get {
-      Hashtable fields  = EvaluatorProxy.fields;
+      var fields  = EvaluatorProxy.Fields;
       StringBuilder tmp = new StringBuilder();
       // TODO: Sort this list...
-      foreach(DictionaryEntry kvp in fields) {
-        FieldInfo field = (FieldInfo)kvp.Value;
+      foreach(var kvp in fields) {
+        Tuple<FieldSpec, FieldInfo> val = kvp.Value;
+        FieldInfo field = (FieldInfo)val.Item2;
         tmp
-          .Append(TypeManagerProxy.CSharpName(field.FieldType))
+          .Append(field.FieldType.FullName)
           .Append(" ")
           .Append(kvp.Key)
           .Append(" = ");
